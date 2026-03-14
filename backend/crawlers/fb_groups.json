@@ -1,0 +1,77 @@
+[
+  {
+    "name": "CỘNG ĐỒNG VÀNG ĐÀ NẴNG",
+    "url": "https://www.facebook.com/groups/989894385979411/",
+    "members": 28000,
+    "posts_day": 90,
+    "priority": 1,
+    "type": "gold_specific",
+    "search_query": "vàng",
+    "status": "joined",
+    "notes": "Top gold group Da Nang, 90+ posts/day — scrape first"
+  },
+  {
+    "name": "NHÓM VÀNG BẠC ĐÀ NẴNG",
+    "url": "https://www.facebook.com/groups/diendanmuabanvang/",
+    "members": 45000,
+    "posts_day": 4,
+    "priority": 2,
+    "type": "gold_specific",
+    "search_query": "vàng tiệm",
+    "status": "joined",
+    "notes": "Largest gold group by members"
+  },
+  {
+    "name": "Hội Vàng Bạc Đà Nẵng – Giao Lưu & Kết Nối",
+    "url": "https://www.facebook.com/groups/hoivangbacdanang/",
+    "members": 6400,
+    "posts_day": 40,
+    "priority": 3,
+    "type": "gold_specific",
+    "search_query": "vàng",
+    "status": "joined",
+    "notes": "40+ posts/day — active community"
+  },
+  {
+    "name": "Cộng đồng vàng Đà Nẵng (Mua rẻ - Bán cao)",
+    "url": "https://www.facebook.com/groups/4215105985422273/",
+    "members": 6400,
+    "posts_day": 4,
+    "priority": 4,
+    "type": "gold_specific",
+    "search_query": "vàng mua bán",
+    "status": "joined"
+  },
+  {
+    "name": "Cộng Đồng Vàng Bạc Đà Nẵng",
+    "url": "https://www.facebook.com/groups/581493630745042/",
+    "members": 10000,
+    "posts_day": 5,
+    "priority": 5,
+    "type": "gold_specific",
+    "search_query": "vàng",
+    "status": "joined"
+  },
+  {
+    "name": "Chợ Đà Nẵng",
+    "url": "https://www.facebook.com/groups/www.danangmuaban.vn/",
+    "members": 562000,
+    "posts_day": 90,
+    "priority": 6,
+    "type": "general_market",
+    "search_query": "tiệm vàng",
+    "status": "joined",
+    "notes": "Huge general group — search for gold posts specifically"
+  },
+  {
+    "name": "Chợ Mua Bán Đà Nẵng",
+    "url": "https://www.facebook.com/groups/115336888493817/",
+    "members": 416000,
+    "posts_day": 90,
+    "priority": 7,
+    "type": "general_market",
+    "search_query": "vàng",
+    "status": "joined",
+    "notes": "Large general group — filter for gold keywords"
+  }
+]

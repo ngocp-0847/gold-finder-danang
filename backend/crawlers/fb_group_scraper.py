@@ -1,8 +1,11 @@
 """
-Step 2: Facebook Group Scraper using saved session.
-Scrapes public groups for gold shop reviews/comments in Da Nang.
+Facebook Group Scraper — connects to real Chrome via CDP (Port 9222).
+Uses Chrome Profile 3 (bombaytera123@gmail.com) which is already logged in.
 
-Requires: fb_session.json (run save_fb_session.py first)
+Requirements:
+  Chrome must be running with --remote-debugging-port=9222
+  Run: python crawlers/start_chrome_debug.py  (or manually)
+
 Run: python crawlers/fb_group_scraper.py
 """
 
@@ -13,12 +16,8 @@ import asyncio
 import json
 import hashlib
 import logging
-import re
 import random
-import time
-from pathlib import Path
 from typing import Optional
-from datetime import datetime
 
 from playwright.async_api import async_playwright, Page
 from database import SessionLocal
@@ -31,119 +30,85 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-SESSION_FILE = Path(__file__).parent / "fb_session.json"
+CDP_URL = "http://localhost:9222"
 
-# Target groups — public groups about buying/selling + reviews in Da Nang
-TARGET_GROUPS = [
-    {
-        "name": "Mua Bán Đà Nẵng",
-        "url": "https://www.facebook.com/groups/muabandanang",
-        "search": "vàng",
-    },
-    {
-        "name": "Đà Nẵng City",
-        "url": "https://www.facebook.com/groups/danangcity",
-        "search": "tiệm vàng",
-    },
-    {
-        "name": "Review Đà Nẵng",
-        "url": "https://www.facebook.com/groups/reviewdanang",
-        "search": "vàng",
-    },
-    {
-        "name": "Hội mua bán Đà Nẵng",
-        "url": "https://www.facebook.com/groups/hoichodanang",
-        "search": "vàng bạc",
-    },
-]
+_GROUPS_JSON = os.path.join(os.path.dirname(__file__), "fb_groups.json")
 
-# Additional: search posts directly
+def _load_groups() -> list[dict]:
+    if os.path.exists(_GROUPS_JSON):
+        with open(_GROUPS_JSON, encoding="utf-8") as f:
+            data = json.load(f)
+        # Only use joined groups, sorted by priority
+        groups = [g for g in data if g.get("status") == "joined"]
+        groups.sort(key=lambda g: g.get("priority", 99))
+        return groups
+    # Fallback
+    return [
+        {"name": "CỘNG ĐỒNG VÀNG ĐÀ NẴNG", "url": "https://www.facebook.com/groups/989894385979411/", "search_query": "vàng"},
+        {"name": "Hội Vàng Bạc Đà Nẵng",    "url": "https://www.facebook.com/groups/hoivangbacdanang/", "search_query": "vàng"},
+    ]
+
+TARGET_GROUPS = _load_groups()
+
 FB_SEARCH_QUERIES = [
-    "tiệm vàng đà nẵng review",
+    "tiệm vàng đà nẵng",
     "mua vàng đà nẵng uy tín",
     "vàng PNJ đà nẵng",
     "vàng DOJI đà nẵng",
-    "tiệm vàng đà nẵng recommend",
+    "hiệu vàng đà nẵng review",
     "bán vàng đà nẵng",
 ]
 
-GOLD_KEYWORDS = [
-    "vàng", "tiệm vàng", "hiệu vàng", "cửa hàng vàng",
-    "gold", "jewelry", "trang sức", "kim cương", "bạc",
-    "SJC", "PNJ", "DOJI", "BTMC", "mua vàng", "bán vàng",
-]
+GOLD_KEYWORDS = ["vàng", "tiệm vàng", "hiệu vàng", "gold", "jewelry", "trang sức",
+                 "SJC", "PNJ", "DOJI", "BTMC", "mua vàng", "bán vàng", "kim cương", "bạc"]
 
-POSITIVE_WORDS = [
-    "tốt", "uy tín", "chuyên nghiệp", "recommend", "hài lòng",
-    "đẹp", "nhanh", "thân thiện", "nhiệt tình", "chất lượng",
-    "giá tốt", "rẻ", "hợp lý", "tin tưởng", "đảm bảo", "good",
-    "great", "excellent", "nice", "love", "thích",
-]
+POSITIVE_WORDS = ["tốt", "uy tín", "chuyên nghiệp", "recommend", "hài lòng", "đẹp",
+                  "nhanh", "thân thiện", "chất lượng", "giá tốt", "rẻ", "tin tưởng",
+                  "good", "great", "excellent", "thích", "ok", "được"]
 
-NEGATIVE_WORDS = [
-    "tệ", "lừa đảo", "giả", "kém", "thất vọng", "chậm",
-    "đắt", "thái độ", "bất lịch sự", "không hài lòng",
-    "tránh", "cẩn thận", "bad", "terrible", "scam",
-]
+NEGATIVE_WORDS = ["tệ", "lừa đảo", "giả", "kém", "thất vọng", "chậm", "đắt",
+                  "thái độ", "bất lịch sự", "tránh", "cẩn thận", "bad", "scam", "không uy tín"]
 
 SHOP_ALIASES: dict[str, list[str]] = {
-    "PNJ": ["pnj", "phú nhuận", "phu nhuan jewelry"],
-    "DOJI": ["doji", "trung tâm vàng bạc doji"],
-    "SJC": ["sjc", "sài gòn kim cương", "saigon jewelry"],
-    "Tứ Quý": ["tứ quý", "tu quy"],
-    "Huy Thanh": ["huy thanh jewelry", "huy thanh"],
-    "Bảo Tín": ["bảo tín", "bao tin", "baotinmanhhai"],
-    "Kim Khánh": ["kim khánh", "kim khanh"],
-    "Ngọc Thịnh": ["ngọc thịnh", "ngoc thinh"],
-    "HanaGold": ["hanagold", "hana gold"],
-    "Minh Hòa": ["minh hòa", "minh hoa"],
-    "Thanh Bình": ["thanh bình", "thanh binh"],
-    "Đại Hòa": ["đại hòa", "dai hoa"],
-    "Kim Long": ["kim long"],
-    "Ánh Kim": ["ánh kim", "anh kim"],
-    "Phúc Lợi": ["phúc lợi", "phuc loi"],
+    "PNJ":        ["pnj", "phú nhuận"],
+    "DOJI":       ["doji"],
+    "SJC":        ["sjc"],
+    "Tứ Quý":    ["tứ quý", "tu quy"],
+    "Huy Thanh": ["huy thanh"],
+    "Bảo Tín":   ["bảo tín", "bao tin"],
+    "Kim Khánh": ["kim khánh"],
+    "HanaGold":  ["hanagold", "hana gold"],
+    "Minh Hòa":  ["minh hòa", "minh hoa"],
 }
 
 
 def text_contains_gold(text: str) -> bool:
-    text_lower = text.lower()
-    return any(kw in text_lower for kw in GOLD_KEYWORDS)
+    t = text.lower()
+    return any(kw.lower() in t for kw in GOLD_KEYWORDS)
 
 
 def classify_to_shop(text: str, shop_list: list[dict]) -> Optional[int]:
-    text_lower = text.lower()
-
-    # 1. Match by alias dict first
-    for shop_key, aliases in SHOP_ALIASES.items():
-        if any(alias in text_lower for alias in aliases):
-            # Find shop_id in DB
+    t = text.lower()
+    for key, aliases in SHOP_ALIASES.items():
+        if any(a in t for a in aliases):
             for s in shop_list:
-                if shop_key.lower() in s["name"].lower():
+                if key.lower() in s["name"].lower():
                     return s["id"]
-
-    # 2. Direct shop name substring match
     for s in shop_list:
-        name = s["name"].lower()
-        # Try partial name (first meaningful word ≥ 4 chars)
-        parts = [p for p in name.split() if len(p) >= 4]
-        if any(p in text_lower for p in parts):
+        parts = [p for p in s["name"].lower().split() if len(p) >= 4]
+        if any(p in t for p in parts):
             return s["id"]
-
     return None
 
 
 def infer_rating(text: str) -> float:
-    text_lower = text.lower()
-    pos = sum(1 for w in POSITIVE_WORDS if w in text_lower)
-    neg = sum(1 for w in NEGATIVE_WORDS if w in text_lower)
-    if neg >= 2:
-        return 1.0
-    if neg == 1 and pos == 0:
-        return 2.0
-    if pos >= 3:
-        return 5.0
-    if pos >= 1:
-        return 4.0
+    t = text.lower()
+    pos = sum(1 for w in POSITIVE_WORDS if w in t)
+    neg = sum(1 for w in NEGATIVE_WORDS if w in t)
+    if neg >= 2: return 1.0
+    if neg == 1 and pos == 0: return 2.0
+    if pos >= 3: return 5.0
+    if pos >= 1: return 4.0
     return 3.0
 
 
@@ -151,169 +116,226 @@ def make_fingerprint(text: str) -> str:
     return hashlib.md5(text.strip().lower().encode()).hexdigest()
 
 
-async def scroll_and_collect(page: Page, scroll_times: int = 5) -> list[str]:
-    """Scroll page and collect all post/comment text blocks."""
-    texts = []
+async def collect_texts_from_page(page: Page, scroll_times: int = 20) -> list[str]:
+    """
+    Scroll slowly and extract text at every step.
+
+    Facebook virtualizes its feed — old posts are REMOVED from DOM as you scroll down.
+    Strategy:
+      • Scroll in small steps (400px) so only a few posts are rendered at a time
+      • Extract text BEFORE scrolling away (capture while still in DOM)
+      • Long pause (2-4s) after each step so React has time to render new posts
+      • Click "Xem thêm" / "See more" to expand truncated posts in the current viewport
+    """
+    texts: set[str] = set()
+
+    # Wait for initial feed to load
+    await asyncio.sleep(4)
+
+    prev_height = 0
+
     for i in range(scroll_times):
-        await page.evaluate("window.scrollBy(0, 1200)")
-        await asyncio.sleep(random.uniform(2, 4))
-
-        # Grab text from post bodies
-        elements = await page.query_selector_all(
-            '[data-ad-preview="message"], [dir="auto"] span, .x1iorvi4 span'
-        )
-        for el in elements:
-            try:
-                t = await el.inner_text()
-                if t and len(t) > 20 and text_contains_gold(t):
-                    texts.append(t.strip())
-            except Exception:
-                pass
-
-    return list(set(texts))  # dedupe by exact text
-
-
-async def expand_comments(page: Page):
-    """Click 'View more comments' buttons."""
-    for _ in range(5):
+        # --- 1. Expand truncated posts visible NOW (before scrolling away) ---
         try:
-            btn = await page.query_selector('[aria-label*="comment"], [role="button"]:has-text("View")')
-            if btn:
-                await btn.click()
-                await asyncio.sleep(1.5)
+            btns = await page.query_selector_all('[role="button"]')
+            for btn in btns[:8]:
+                try:
+                    txt = (await btn.inner_text()).strip().lower()
+                    if txt in ("see more", "xem thêm", "more", "thêm"):
+                        await btn.click()
+                        await asyncio.sleep(0.8)
+                except Exception:
+                    pass
         except Exception:
-            break
+            pass
+
+        # --- 2. Extract ALL text visible in current viewport & full page ---
+        try:
+            body = await page.evaluate("document.body.innerText")
+            new_count = 0
+            for chunk in body.split("\n"):
+                chunk = chunk.strip()
+                if len(chunk) > 40 and text_contains_gold(chunk):
+                    if chunk not in texts:
+                        texts.add(chunk)
+                        new_count += 1
+            if new_count:
+                logger.info(f"  Step {i+1}/{scroll_times}: +{new_count} texts (total={len(texts)})")
+        except Exception as e:
+            logger.warning(f"  Extract error: {e}")
+
+        # --- 3. Check if we've truly hit the bottom (allow 2 consecutive same-height) ---
+        try:
+            cur_height = await page.evaluate("document.documentElement.scrollHeight")
+            if cur_height == prev_height:
+                # Wait a bit more — FB may still be loading
+                await asyncio.sleep(3)
+                cur_height2 = await page.evaluate("document.documentElement.scrollHeight")
+                if cur_height2 == prev_height:
+                    logger.info(f"  Reached page bottom at step {i+1}")
+                    break
+                else:
+                    prev_height = cur_height2
+                    continue
+            prev_height = cur_height
+        except Exception:
+            pass
+
+        # --- 4. Scroll slowly (small step) and wait for React to render ---
+        scroll_step = random.randint(350, 500)  # small increments
+        await page.evaluate(f"window.scrollBy(0, {scroll_step})")
+        # Longer sleep = Facebook has time to load next batch before we extract
+        await asyncio.sleep(random.uniform(2.5, 4.0))
+
+    logger.info(f"  ✅ Collected {len(texts)} gold texts")
+    return list(texts)
 
 
-async def search_group(page: Page, group_url: str, search_term: str) -> list[str]:
-    """Navigate to group search results."""
-    # Facebook group search: /groups/GROUPID?q=QUERY
-    search_url = f"{group_url}?q={search_term.replace(' ', '%20')}"
-    logger.info(f"  Searching: {search_url}")
+async def scrape_group_feed(page: Page, group: dict, scroll_times: int = 60) -> list[str]:
+    """
+    Scrape the full live feed of a group (no keyword filter on URL).
+    Useful for high-activity groups where search returns too few results.
+    Scroll deeply — FB virtualizes old posts, so we extract at every step.
+    """
+    base_url = group["url"].rstrip("/")
+    logger.info(f"  [FEED] → {base_url}")
     try:
-        await page.goto(search_url, timeout=30000, wait_until="domcontentloaded")
-        await asyncio.sleep(3)
-        return await scroll_and_collect(page, scroll_times=5)
+        await page.goto(base_url, wait_until="domcontentloaded", timeout=35000)
+        await asyncio.sleep(5)
+        return await collect_texts_from_page(page, scroll_times=scroll_times)
     except Exception as e:
         logger.warning(f"  Error: {e}")
         return []
 
 
-async def search_fb_posts(page: Page, query: str) -> list[str]:
-    """Use Facebook search for posts."""
-    url = f"https://www.facebook.com/search/posts/?q={query.replace(' ', '%20')}"
-    logger.info(f"  FB Search: {url}")
+async def scrape_group(page: Page, group: dict) -> list[str]:
+    base_url = group["url"].rstrip("/")
+    search_q = group.get("search_query", "vàng").replace(" ", "+")
+    # Use group search URL which filters posts by keyword
+    url = f"{base_url}?q={search_q}"
+    logger.info(f"  [SEARCH] → {url}")
     try:
-        await page.goto(url, timeout=30000, wait_until="domcontentloaded")
-        await asyncio.sleep(3)
-        return await scroll_and_collect(page, scroll_times=6)
+        await page.goto(url, wait_until="domcontentloaded", timeout=35000)
+        await asyncio.sleep(5)
+        current = page.url
+        if "q=" not in current:
+            logger.info(f"  Redirected to feed, scraping directly")
+        return await collect_texts_from_page(page, scroll_times=25)
     except Exception as e:
         logger.warning(f"  Error: {e}")
         return []
 
 
-async def run(max_items: int = 500):
-    if not SESSION_FILE.exists():
-        logger.error(f"Session file not found: {SESSION_FILE}")
-        logger.error("Run: python crawlers/save_fb_session.py first!")
-        return {"error": "no_session"}
+async def scrape_search(page: Page, query: str) -> list[str]:
+    url = f"https://www.facebook.com/search/posts/?q={query.replace(' ', '+')}"
+    logger.info(f"  → {url}")
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        await asyncio.sleep(4)
+        return await collect_texts_from_page(page, scroll_times=10)
+    except Exception as e:
+        logger.warning(f"  Error: {e}")
+        return []
 
+
+async def run(max_items: int = 1000) -> dict:
     db = SessionLocal()
     shops = [{"id": s.id, "name": s.name} for s in db.query(Shop).all()]
-
-    # Load existing fingerprints to avoid dupes
-    existing = {r.text_fingerprint for r in db.query(Review).filter(
-        Review.source.like("facebook%")
-    ).all() if hasattr(r, "text_fingerprint") and r.text_fingerprint}
+    existing_fps = {make_fingerprint(r.text) for r in db.query(Review).filter(
+        Review.source.like("facebook%")).all() if r.text}
 
     stats = {"scraped": 0, "classified": 0, "unclassified": 0, "dupes": 0, "saved": 0}
     all_texts: list[str] = []
 
     async with async_playwright() as p:
-        context = await p.chromium.launch_persistent_context(
-            user_data_dir="",  # temp
-            headless=True,
-            storage_state=str(SESSION_FILE),
-            locale="vi-VN",
-            viewport={"width": 1366, "height": 768},
-            user_agent=(
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-        )
-
-        page = await context.new_page()
-
-        # Verify session is valid
-        await page.goto("https://www.facebook.com/", wait_until="domcontentloaded")
-        await asyncio.sleep(3)
-        if "login" in page.url:
-            logger.error("Session expired! Re-run save_fb_session.py")
-            await context.close()
+        # Connect to real Chrome running with --remote-debugging-port=9222
+        try:
+            browser = await p.chromium.connect_over_cdp(CDP_URL)
+            logger.info(f"✅ Connected to Chrome via CDP: {CDP_URL}")
+        except Exception as e:
+            logger.error(f"❌ Cannot connect to Chrome CDP: {e}")
+            logger.error("Run: python crawlers/start_chrome_debug.py first!")
             db.close()
-            return {"error": "session_expired"}
+            return {"error": "cdp_not_available", "detail": str(e)}
 
-        logger.info(f"✅ Session valid. Logged in at: {page.url}")
+        # Use existing context (has cookies/session)
+        contexts = browser.contexts
+        ctx = contexts[0] if contexts else await browser.new_context()
 
-        # 1. Scrape groups
-        for group in TARGET_GROUPS:
-            logger.info(f"\n📦 Group: {group['name']}")
-            texts = await search_group(page, group["url"], group["search"])
-            logger.info(f"  Found {len(texts)} gold-related texts")
+        # Open a new page for scraping (don't hijack existing tabs)
+        page = await ctx.new_page()
+
+        # Verify login
+        await page.goto("https://www.facebook.com/", wait_until="domcontentloaded", timeout=30000)
+        await asyncio.sleep(3)
+        body = await page.evaluate("document.body.innerText")
+        is_logged_in = "Log in" not in body[:100] and len(body) > 500
+
+        logger.info(f"Login check — body length: {len(body)}, logged_in: {is_logged_in}")
+        if not is_logged_in:
+            logger.error("Not logged in!")
+            await page.close()
+            db.close()
+            return {"error": "not_logged_in"}
+
+        logger.info(f"✅ Logged in! Body preview: {body[:100]}")
+
+        # 1. Full feed scrape for top-priority gold groups (most valuable)
+        top_groups = [g for g in TARGET_GROUPS if g.get("type") == "gold_specific"]
+        other_groups = [g for g in TARGET_GROUPS if g.get("type") != "gold_specific"]
+
+        for group in top_groups:
+            logger.info(f"\n🏆 {group['name']} [FULL FEED — {group.get('posts_day',0)}+ posts/day]")
+            texts = await scrape_group_feed(page, group, scroll_times=80)
             all_texts.extend(texts)
-            await asyncio.sleep(random.uniform(3, 6))
+            await asyncio.sleep(random.uniform(3, 5))
 
-        # 2. Scrape search results
+        # 2. Search-filtered scrape for general groups (less noise)
+        for group in other_groups:
+            logger.info(f"\n📦 {group['name']} [SEARCH]")
+            texts = await scrape_group(page, group)
+            all_texts.extend(texts)
+            await asyncio.sleep(random.uniform(2, 4))
+
+        # 3. FB global search for extra coverage
         for query in FB_SEARCH_QUERIES:
-            logger.info(f"\n🔍 Search: '{query}'")
-            texts = await search_fb_posts(page, query)
-            logger.info(f"  Found {len(texts)} gold-related texts")
+            logger.info(f"\n🔍 '{query}'")
+            texts = await scrape_search(page, query)
             all_texts.extend(texts)
-            await asyncio.sleep(random.uniform(3, 6))
+            await asyncio.sleep(random.uniform(2, 4))
 
-        await context.close()
+        await page.close()
+        # Don't close the browser — it's the real user's Chrome!
 
-    # Dedupe by content
+    # Dedupe + classify + save
     all_texts = list(set(all_texts))
     stats["scraped"] = len(all_texts)
-    logger.info(f"\n📊 Total unique texts: {len(all_texts)}")
+    logger.info(f"\n📊 Total unique gold texts: {len(all_texts)}")
 
-    # Classify + save
     for text in all_texts[:max_items]:
         fp = make_fingerprint(text)
-        if fp in existing:
+        if fp in existing_fps:
             stats["dupes"] += 1
             continue
-
         shop_id = classify_to_shop(text, shops)
-        rating = infer_rating(text)
-        source = "facebook_group"
-
+        if shop_id is None:
+            # Skip reviews that can't be matched — shop_id is NOT NULL in schema
+            stats["unclassified"] += 1
+            continue
         review = Review(
             shop_id=shop_id,
             text=text[:2000],
-            rating=rating,
+            rating=infer_rating(text),
             author="facebook_user",
-            source=source,
+            source="facebook_group",
         )
-        # Store fingerprint if model supports it
-        if hasattr(review, "text_fingerprint"):
-            review.text_fingerprint = fp
-
         db.add(review)
-        existing.add(fp)
-
-        if shop_id:
-            stats["classified"] += 1
-        else:
-            stats["unclassified"] += 1
+        existing_fps.add(fp)
+        stats["classified"] += 1
         stats["saved"] += 1
 
     db.commit()
     db.close()
-
-    stats["total_texts"] = len(all_texts)
     logger.info(f"\n🎉 Done! {stats}")
     return stats
 
