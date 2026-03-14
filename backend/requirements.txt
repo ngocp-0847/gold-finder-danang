@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+requests
+beautifulsoup4
+lxml
+python-dotenv
+pydantic
+haversine
+schedule
+httpx
+aiohttp

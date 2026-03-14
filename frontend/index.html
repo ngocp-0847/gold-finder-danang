@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vàng Đà Nẵng 🥇 - Tìm Tiệm Vàng Uy Tín</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- Leaflet Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <header class="header">
+    <div class="header-inner">
+      <div class="logo">🥇 Vàng Đà Nẵng</div>
+      <div class="header-stats" id="headerStats">
+        <span>Đang tải...</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- HERO SEARCH -->
+  <section class="hero">
+    <div class="hero-content">
+      <h1>Tìm Tiệm Vàng Uy Tín tại Đà Nẵng</h1>
+      <p>So sánh giá thực, đánh giá thật, gần bạn nhất</p>
+      <div class="search-bar">
+        <input type="text" id="searchInput" placeholder="Tìm tên tiệm, địa chỉ..." />
+        <button class="btn btn-primary" onclick="searchShops()">🔍 Tìm kiếm</button>
+        <button class="btn btn-gold" onclick="findNearMe()">📍 Gần tôi</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- MAIN LAYOUT -->
+  <main class="main-layout">
+
+    <!-- SIDEBAR FILTERS -->
+    <aside class="sidebar">
+      <div class="filter-section">
+        <h3>🏙️ Quận</h3>
+        <div id="districtFilters" class="filter-chips">
+          <button class="chip active" onclick="filterDistrict(null, this)">Tất cả</button>
+        </div>
+      </div>
+
+      <div class="filter-section">
+        <h3>⭐ Đánh giá tối thiểu</h3>
+        <div class="filter-chips">
+          <button class="chip active" onclick="filterRating(0, this)">Tất cả</button>
+          <button class="chip" onclick="filterRating(4.5, this)">4.5+</button>
+          <button class="chip" onclick="filterRating(4.0, this)">4.0+</button>
+          <button class="chip" onclick="filterRating(3.5, this)">3.5+</button>
+        </div>
+      </div>
+
+      <div class="filter-section">
+        <h3>🏬 Loại cửa hàng</h3>
+        <div class="filter-chips">
+          <button class="chip active" onclick="filterChain(null, this)">Tất cả</button>
+          <button class="chip" onclick="filterChain(true, this)">Chuỗi lớn</button>
+          <button class="chip" onclick="filterChain(false, this)">Tiệm độc lập</button>
+        </div>
+      </div>
+
+      <div class="filter-section">
+        <h3>💰 Giá vàng hôm nay</h3>
+        <div id="priceWidget" class="price-widget">Đang tải...</div>
+        <button class="btn btn-sm btn-outline" onclick="refreshPrices()" style="margin-top:8px;width:100%">
+          🔄 Cập nhật giá
+        </button>
+      </div>
+    </aside>
+
+    <!-- CONTENT AREA -->
+    <div class="content-area">
+      <!-- TABS -->
+      <div class="tabs">
+        <button class="tab active" onclick="switchTab('list', this)">📋 Danh sách</button>
+        <button class="tab" onclick="switchTab('map', this)">🗺️ Bản đồ</button>
+        <button class="tab" onclick="switchTab('prices', this)">📊 So sánh giá</button>
+      </div>
+
+      <!-- LIST VIEW -->
+      <div id="tabList" class="tab-content active">
+        <div id="shopList" class="shop-grid">
+          <div class="loading">⏳ Đang tải danh sách tiệm vàng...</div>
+        </div>
+      </div>
+
+      <!-- MAP VIEW -->
+      <div id="tabMap" class="tab-content">
+        <div id="map" style="height: 500px; border-radius: 12px;"></div>
+      </div>
+
+      <!-- PRICE COMPARISON VIEW -->
+      <div id="tabPrices" class="tab-content">
+        <div class="price-compare-header">
+          <h2>📊 So sánh giá vàng</h2>
+          <div class="gold-type-tabs">
+            <button class="gold-tab active" onclick="loadPriceCompare('SJC', this)">SJC</button>
+            <button class="gold-tab" onclick="loadPriceCompare('Nhẫn', this)">Nhẫn</button>
+            <button class="gold-tab" onclick="loadPriceCompare('18K', this)">Vàng 18K</button>
+            <button class="gold-tab" onclick="loadPriceCompare('999', this)">Vàng 999</button>
+          </div>
+        </div>
+        <div id="priceCompareTable">Đang tải...</div>
+        <div class="price-sources-note">
+          <small>📡 Nguồn giá: SJC, PNJ, DOJI, BTMC — cập nhật mỗi giờ</small>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- SHOP DETAIL MODAL -->
+  <div id="shopModal" class="modal hidden">
+    <div class="modal-backdrop" onclick="closeModal()"></div>
+    <div class="modal-content">
+      <button class="modal-close" onclick="closeModal()">✕</button>
+      <div id="modalBody">Đang tải...</div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
