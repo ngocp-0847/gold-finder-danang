@@ -466,6 +466,49 @@ def trigger_facebook_crawl_sync(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/reviews/facebook/groups")
+async def trigger_fb_group_crawl(background_tasks: BackgroundTasks):
+    """
+    Trigger Facebook Group scraper using saved session (fb_session.json).
+    Requires: run `python crawlers/save_fb_session.py` first to save login session.
+    Scrapes: Mua Bán Đà Nẵng, Đà Nẵng City, Review Đà Nẵng groups + FB search.
+    """
+    from pathlib import Path
+    session_file = Path(__file__).parent / "crawlers" / "fb_session.json"
+    if not session_file.exists():
+        raise HTTPException(
+            status_code=400,
+            detail="fb_session.json not found. Run: python crawlers/save_fb_session.py first."
+        )
+
+    def do_crawl():
+        import asyncio
+        from crawlers.fb_group_scraper import run as fb_run
+        result = asyncio.run(fb_run())
+        logger.info(f"FB group crawl result: {result}")
+
+    background_tasks.add_task(do_crawl)
+    return {
+        "message": "Facebook group crawl started",
+        "status": "started",
+        "groups": ["Mua Bán Đà Nẵng", "Đà Nẵng City", "Review Đà Nẵng", "Hội mua bán Đà Nẵng"],
+        "searches": ["tiệm vàng đà nẵng review", "mua vàng đà nẵng uy tín", "vàng PNJ đà nẵng", "..."],
+    }
+
+
+@app.get("/reviews/facebook/groups/status")
+def fb_session_status():
+    """Check if Facebook session file exists and is ready."""
+    from pathlib import Path
+    session_file = Path(__file__).parent / "crawlers" / "fb_session.json"
+    return {
+        "session_exists": session_file.exists(),
+        "session_path": str(session_file),
+        "ready": session_file.exists(),
+        "instruction": "Run `python crawlers/save_fb_session.py` to create session" if not session_file.exists() else "Session ready. Call POST /reviews/facebook/groups to crawl.",
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
