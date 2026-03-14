@@ -4,7 +4,7 @@ Vàng Đà Nẵng API - FastAPI backend
 
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
 from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks
@@ -14,11 +14,12 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
 
-from database import get_db, engine
+from database import get_db, engine, SessionLocal
 from models import Base, Shop, Review, GoldPrice, PriceSource
 from schemas import ShopOut, ReviewOut, GoldPriceOut, PriceCompareItem, StatsOut
 from crawlers.gold_prices import crawl_all_prices
 from crawlers.google_maps import crawl_via_places_api
+from crawlers.price_pipeline import run_pipeline
 
 # Init DB
 Base.metadata.create_all(bind=engine)
@@ -38,6 +39,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ────────────────────────────────────────────
+# Startup / Shutdown events
+# ────────────────────────────────────────────
+
+@app.on_event("startup")
+def on_startup():
+    from scheduler import start_scheduler
+    start_scheduler()
+    logger.info("Background price scheduler started")
+
+
+@app.on_event("shutdown")
+def on_shutdown():
+    from scheduler import stop_scheduler
+    stop_scheduler()
+    logger.info("Background price scheduler stopped")
 
 # Serve frontend static files
 frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend")
@@ -338,6 +357,54 @@ async def trigger_shop_crawl(background_tasks: BackgroundTasks, db: Session = De
 def list_districts(db: Session = Depends(get_db)):
     districts = [r[0] for r in db.query(Shop.district).distinct().all() if r[0]]
     return sorted(districts)
+
+
+# ────────────────────────────────────────────
+# Realtime price pipeline endpoints
+# ────────────────────────────────────────────
+
+@app.get("/prices/live")
+def get_live_prices():
+    """
+    Immediately crawl all sources and return summary.
+    Prices are also saved to the database.
+    """
+    db = SessionLocal()
+    try:
+        summary = run_pipeline(db)
+        return summary
+    finally:
+        db.close()
+
+
+@app.get("/prices/history")
+def get_price_history(
+    source: Optional[str] = Query(None, description="Filter by source_name (e.g. SJC, PNJ)"),
+    hours: int = Query(24, description="Look back N hours", ge=1, le=720),
+    db: Session = Depends(get_db),
+):
+    """
+    Return gold price history from the database for the last N hours.
+    Optionally filter by source_name.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    q = db.query(GoldPrice).filter(GoldPrice.crawled_at >= cutoff)
+    if source:
+        q = q.filter(GoldPrice.source_name.ilike(f"%{source}%"))
+    prices = q.order_by(desc(GoldPrice.crawled_at)).limit(500).all()
+    return [
+        {
+            "id": p.id,
+            "shop_id": p.shop_id,
+            "source_name": p.source_name,
+            "gold_type": p.gold_type,
+            "buy_price": p.buy_price,
+            "sell_price": p.sell_price,
+            "unit": p.unit,
+            "crawled_at": p.crawled_at,
+        }
+        for p in prices
+    ]
 
 
 if __name__ == "__main__":

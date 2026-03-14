@@ -10,3 +10,4 @@ haversine
 schedule
 httpx
 aiohttp
+apscheduler
