@@ -20,6 +20,7 @@ from schemas import ShopOut, ReviewOut, GoldPriceOut, PriceCompareItem, StatsOut
 from crawlers.gold_prices import crawl_all_prices
 from crawlers.google_maps import crawl_via_places_api
 from crawlers.price_pipeline import run_pipeline
+from crawlers.facebook_scraper import run_facebook_crawler, export_reviews_to_csv
 
 # Init DB
 Base.metadata.create_all(bind=engine)
@@ -405,6 +406,64 @@ def get_price_history(
         }
         for p in prices
     ]
+
+
+@app.get("/reviews/facebook")
+async def trigger_facebook_crawl(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Trigger Facebook/UGC comment crawl on demand.
+    Scrapes public sources (mbasic.facebook.com if accessible, else
+    Google Search, webtretho.com, otofun.net, Reddit, foody.vn).
+    Returns summary stats.
+    """
+    def do_crawl():
+        _db = SessionLocal()
+        try:
+            result = run_facebook_crawler(_db)
+            # Export updated CSV
+            import os
+            csv_path = os.path.join(
+                os.path.dirname(__file__), "..", "data", "reviews.csv"
+            )
+            export_reviews_to_csv(_db, csv_path)
+            logger.info(f"Facebook/UGC crawl complete: {result}")
+        except Exception as e:
+            logger.error(f"Facebook/UGC crawl failed: {e}", exc_info=True)
+        finally:
+            _db.close()
+
+    background_tasks.add_task(do_crawl)
+    return {
+        "message": "Facebook/UGC crawl started in background",
+        "status": "started",
+        "note": (
+            "Crawling public sources: mbasic.facebook.com (if accessible), "
+            "Google Search, webtretho.com, otofun.net, Reddit r/Vietnam, foody.vn"
+        ),
+    }
+
+
+@app.get("/reviews/facebook/sync")
+def trigger_facebook_crawl_sync(db: Session = Depends(get_db)):
+    """
+    Synchronous version — run Facebook/UGC crawl and return results immediately.
+    Warning: This may take 30-60 seconds.
+    """
+    try:
+        result = run_facebook_crawler(db)
+        # Export updated CSV
+        import os
+        csv_path = os.path.join(
+            os.path.dirname(__file__), "..", "data", "reviews.csv"
+        )
+        export_reviews_to_csv(db, csv_path)
+        return result
+    except Exception as e:
+        logger.error(f"Facebook/UGC sync crawl failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

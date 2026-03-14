@@ -8,6 +8,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 
 from crawlers.price_pipeline import run_pipeline
+from crawlers.facebook_scraper import run_facebook_crawler, export_reviews_to_csv
 from database import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,24 @@ def run_price_job():
         db.close()
 
 
+def run_facebook_job():
+    """Facebook/UGC crawl job — called by scheduler every 6 hours."""
+    import os
+    db = SessionLocal()
+    try:
+        result = run_facebook_crawler(db)
+        # Export updated CSV
+        csv_path = os.path.join(
+            os.path.dirname(__file__), "..", "data", "reviews.csv"
+        )
+        export_reviews_to_csv(db, csv_path)
+        logger.info(f"[scheduler] Facebook/UGC crawl: {result}")
+    except Exception as e:
+        logger.error(f"[scheduler] run_facebook_job error: {e}")
+    finally:
+        db.close()
+
+
 def start_scheduler() -> BackgroundScheduler:
     """Start the background scheduler. Safe to call multiple times (idempotent)."""
     global _scheduler
@@ -51,8 +70,16 @@ def start_scheduler() -> BackgroundScheduler:
         replace_existing=True,
         max_instances=1,
     )
+    _scheduler.add_job(
+        run_facebook_job,
+        trigger="interval",
+        hours=6,
+        id="facebook_crawl",
+        replace_existing=True,
+        max_instances=1,
+    )
     _scheduler.start()
-    logger.info("[scheduler] Started — price crawl every 15 minutes")
+    logger.info("[scheduler] Started — price crawl every 15 min, Facebook/UGC crawl every 6 hours")
     return _scheduler
 
 
